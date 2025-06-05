@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# Detection Algorithm FCD, PEDIATRIC TEMPLATE, bash
+# CORTICAL THICKNESS images, MAC ver.2024-10-30
+# FIRST RUN recon-all -s {SUBJECT} -all -qcache procedure to calculate all freesurfer parameters of the subject
+# RUN: sig_corthk_mac {SUBJECT} (subject in $SUBJECTS_DIR)
+
+
+echo "1. Create folder in $SUBJECTS_DIR/fsgd_ped/"
+mkdir $SUBJECTS_DIR/fsgd_ped/$1
+
+echo "2. Copy important files for GLM analysis"
+cp ~/bin/param_files/FSGDtablePED_template.fsgd $SUBJECTS_DIR/fsgd_ped/$1/FSGDtablePED.fsgd #EDITOVAT!!!
+cp ~/bin/param_files/contrast_negativeone_positiveone.mtx $SUBJECTS_DIR/fsgd_ped/$1/contrast_negativeone_positiveone.mtx
+
+echo "3. Change PWD"
+subjectdir=$SUBJECTS_DIR/fsgd_ped/$1
+cd "$subjectdir"
+pwd
+
+echo "4. Editation of FSGDtablePED.fsgd file"
+# Assign the filename
+filename="FSGDtablePED.fsgd"
+# The search string
+search="XXXXXXXXXX"
+# The replace string
+# PRO MACOS: brew install gsed
+replace=${1}
+if [[ "$search" != "" && $replace != "" ]]; then
+gsed -i "s/$search/$replace/" $filename
+fi
+
+
+echo "5. Cache for Left and Right hemi, 15mm"
+# LeftHemi, 15mm
+mris_preproc --fsgd $SUBJECTS_DIR/fsgd_ped/$1/FSGDtablePED.fsgd --cache-in thickness.fwhm15.fsaverage --target fsaverage --hemi lh --out $SUBJECTS_DIR/fsgd_ped/$1/lh_thickness_15mm.mgh
+# RightHemi, 15mm
+mris_preproc --fsgd $SUBJECTS_DIR/fsgd_ped/$1/FSGDtablePED.fsgd --cache-in thickness.fwhm15.fsaverage --target fsaverage --hemi rh --out $SUBJECTS_DIR/fsgd_ped/$1/rh_thickness_15mm.mgh
+# kontrola mgh-souboru
+mri_info $SUBJECTS_DIR/fsgd_ped/$1/lh_thickness_15mm.mgh
+mri_info $SUBJECTS_DIR/fsgd_ped/$1/rh_thickness_15mm.mgh
+
+echo "6. General Linear Model analysis"
+mri_glmfit --y $SUBJECTS_DIR/fsgd_ped/$1/lh_thickness_15mm.mgh --fsgd $SUBJECTS_DIR/fsgd_ped/$1/FSGDtablePED.fsgd dods --C $SUBJECTS_DIR/fsgd_ped/$1/contrast_negativeone_positiveone.mtx --surf fsaverage lh --cortex --glmdir $SUBJECTS_DIR/fsgd_ped/$1/lh_thickness_glmdir
+mri_glmfit --y $SUBJECTS_DIR/fsgd_ped/$1/rh_thickness_15mm.mgh --fsgd $SUBJECTS_DIR/fsgd_ped/$1/FSGDtablePED.fsgd dods --C $SUBJECTS_DIR/fsgd_ped/$1/contrast_negativeone_positiveone.mtx --surf fsaverage rh --cortex --glmdir $SUBJECTS_DIR/fsgd_ped/$1/rh_thickness_glmdir
+
+echo "7. Konversion sig.mgh from fsaverage space to the structural space for both hemi"
+mri_surf2surf --hemi lh --srcsubject fsaverage --srcsurfval $SUBJECTS_DIR/fsgd_ped/$1/lh_thickness_glmdir/contrast_negativeone_positiveone/sig.mgh --trgsubject $1 --trgsurfval $SUBJECTS_DIR/fsgd_ped/$1/sig_lh.mgh
+mri_surf2surf --hemi rh --srcsubject fsaverage --srcsurfval $SUBJECTS_DIR/fsgd_ped/$1/rh_thickness_glmdir/contrast_negativeone_positiveone/sig.mgh --trgsubject $1 --trgsurfval $SUBJECTS_DIR/fsgd_ped/$1/sig_rh.mgh
+
+echo "8. Konversion surf lh and rh to nii.gz-file for both hemi"
+mri_surf2vol --o $SUBJECTS_DIR/fsgd_ped/$1/sig_both_hemi_ped.nii.gz --so $SUBJECTS_DIR/$1/surf/lh.white $SUBJECTS_DIR/fsgd_ped/$1/sig_lh.mgh --so $SUBJECTS_DIR/$1/surf/rh.white $SUBJECTS_DIR/fsgd_ped/$1/sig_rh.mgh --ribbon /$SUBJECTS_DIR/$1/mri/ribbon.mgz
+
+echo "9. Konversion thickness and T1 to nii.gz-file"
+#cd $SUBJECTS_DIR/subject
+mri_surf2vol --o $SUBJECTS_DIR/fsgd_ped/$1/surf2vol_white_thickness_ped.nii.gz --subject $1 --so $SUBJECTS_DIR/$1/surf/lh.white $SUBJECTS_DIR/$1/surf/lh.thickness --so $SUBJECTS_DIR/$1/surf/rh.white $SUBJECTS_DIR/$1/surf/rh.thickness
+mri_convert $SUBJECTS_DIR/$1/mri/T1.mgz $SUBJECTS_DIR/fsgd_ped/$1/T1_ped.nii.gz
+
+freeview -f  $SUBJECTS_DIR/$1/surf/lh.pial:overlay=$SUBJECTS_DIR/fsgd_ped/$1/sig_lh.mgh:overlay_color=heat:overlay_threshold=2.0,5.0:name=lh_pial:overlay=$SUBJECTS_DIR/$1/surf/lh.thickness:overlay_color=colorwheel,inverse:overlay_threshold=0.5,5.5 \
+$SUBJECTS_DIR/$1/surf/rh.pial:overlay=$SUBJECTS_DIR/fsgd_ped/$1/sig_rh.mgh:overlay_color=heat:overlay_threshold=2.0,5.0:name=rh_pial:overlay=$SUBJECTS_DIR/$1/surf/rh.thickness:overlay_color=colorwheel,inverse:overlay_threshold=0.5,5.5 \
+$SUBJECTS_DIR/$1/surf/lh.inflated:overlay=$SUBJECTS_DIR/fsgd_ped/$1/sig_lh.mgh:overlay_color=heat:overlay_threshold=2.0,5.0:name=lh_inflated:overlay=$SUBJECTS_DIR/$1/surf/lh.thickness:overlay_color=colorwheel,inverse:overlay_threshold=0.5,5.5 \
+$SUBJECTS_DIR/$1/surf/rh.inflated:overlay=$SUBJECTS_DIR/fsgd_ped/$1/sig_rh.mgh:overlay_color=heat:overlay_threshold=2.0,5.0:name=rh_inflated:overlay=$SUBJECTS_DIR/$1/surf/rh.thickness:overlay_color=colorwheel,inverse:overlay_threshold=0.5,5.5 \
+--viewport 3d 
